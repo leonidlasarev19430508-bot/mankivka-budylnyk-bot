@@ -134,7 +134,7 @@ def ai_summarize(items):
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_KEY}"},
         json={
-            "model": "llama-4-maverick-17b-128e-instruct",
+            "model": "llama3-70b-8192",
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(items, ensure_ascii=False)},
