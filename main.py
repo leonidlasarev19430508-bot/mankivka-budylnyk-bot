@@ -95,21 +95,17 @@ def fetch_national_news():
 
 def fetch_local_news():
     try:
-        r = requests.get('https://mankivska-gromada.gov.ua/novyny', timeout=10)
-        soup = BeautifulSoup(r.text, 'html.parser')
+        url = 'https://news.google.com/rss/search?q=Маньківка+Черкаська&hl=uk&gl=UA&ceid=UA:uk'
+        feed = feedparser.parse(url)
         items = []
-        for h3 in soup.find_all('h3')[:7]:
-            a = h3.find('a')
-            if a:
-                t = a.get_text(strip=True)
-                l = a.get('href', '')
-                if not l.startswith('http'):
-                    l = 'https://mankivska-gromada.gov.ua' + l
-                if t:
-                    items.append({'title': t, 'link': l, 'source': 'local'})
+        for e in feed.entries[:7]:
+            t = e.get('title', '').strip()
+            l = e.get('link', '').strip()
+            if t and l:
+                items.append({'title': t, 'link': l, 'source': 'local'})
         return items
     except Exception as e:
-        log.warning("Громада: %s", e)
+        log.warning("Місцеві новини: %s", e)
         return []
 
 def dedup(items):
