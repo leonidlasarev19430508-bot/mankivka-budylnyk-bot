@@ -97,7 +97,7 @@ def fetch_local_news():
     items = []
     try:
         from datetime import datetime, timezone, timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         
         sources = [
             'https://news.google.com/rss/search?q=Маньківка&hl=uk&gl=UA&ceid=UA:uk',
