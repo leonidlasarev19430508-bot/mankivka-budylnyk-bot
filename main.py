@@ -94,28 +94,37 @@ def fetch_national_news():
     return items
 
 def fetch_local_news():
+    items = []
     try:
-        url = 'https://news.google.com/rss/search?q=Маньківка+Черкаська&hl=uk&gl=UA&ceid=UA:uk'
-        feed = feedparser.parse(url)
-        items = []
-        for e in feed.entries[:7]:
-            t = e.get('title', '').strip()
-            l = e.get('link', '').strip()
-            if t and l:
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        
+        sources = [
+            'https://news.google.com/rss/search?q=Маньківка&hl=uk&gl=UA&ceid=UA:uk',
+            'https://news.google.com/rss/search?q=Маньківська+громада&hl=uk&gl=UA&ceid=UA:uk',
+            'https://news.google.com/rss/search?q=Черкаська+область+новини&hl=uk&gl=UA&ceid=UA:uk',
+        ]
+        
+        seen = set()
+        for url in sources:
+            feed = feedparser.parse(url)
+            for e in feed.entries[:5]:
+                t = e.get('title', '').strip()
+                l = e.get('link', '').strip()
+                pub = e.get('published_parsed')
+                if not t or not l or t in seen:
+                    continue
+                if pub:
+                    pub_dt = datetime(*pub[:6], tzinfo=timezone.utc)
+                    if pub_dt < cutoff:
+                        continue
+                seen.add(t)
                 items.append({'title': t, 'link': l, 'source': 'local'})
-        return items
+        
+        return items[:7]
     except Exception as e:
         log.warning("Місцеві новини: %s", e)
         return []
-
-def dedup(items):
-    seen, result = set(), []
-    for item in items:
-        key = ' '.join(item['title'].lower().split()[:6])
-        if key not in seen:
-            seen.add(key)
-            result.append(item)
-    return result
 
 SYSTEM_PROMPT = (
     "Ти редактор Telegram-каналу «Маньківка 8:00».\n"
