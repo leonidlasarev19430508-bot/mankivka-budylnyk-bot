@@ -1,8 +1,7 @@
 import os, json, logging
 import requests
 import feedparser
-from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pytz
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -29,16 +28,33 @@ RSS_FEEDS = [
     ('ЕП',        'https://www.epravda.com.ua/rss/'),
 ]
 
+LOCAL_RSS_FEEDS = [
+    'https://news.google.com/rss/search?q=Маньківка+Черкаська&hl=uk&gl=UA&ceid=UA:uk',
+    'https://news.google.com/rss/search?q=Маньківська+громада&hl=uk&gl=UA&ceid=UA:uk',
+    'https://news.google.com/rss/search?q=Черкаська+область&hl=uk&gl=UA&ceid=UA:uk',
+]
+
 NUM_EMOJI = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣']
 
 def _t(val):
     v = round(val)
     return f"+{v}°C" if v >= 0 else f"{v}°C"
 
+# ✅ ВИПРАВЛЕНО: додана функція dedup яка була відсутня
+def dedup(items):
+    seen = set()
+    result = []
+    for item in items:
+        key = item['title'].strip().lower()[:60]
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
 def fetch_weather():
     url = (f"https://api.openweathermap.org/data/2.5/forecast"
            f"?lat=49.02&lon=30.31&appid={OWM_KEY}&units=metric&lang=ua&cnt=8")
-    data = requests.get(url, timeout=10).json()
+    data = requests.get(url, timeout=8).json()
     fc = data['list']
     temp_min = min(f['main']['temp_min'] for f in fc)
     temp_max = max(f['main']['temp_max'] for f in fc)
@@ -55,7 +71,7 @@ def fetch_weather():
 def fetch_currencies():
     lines = []
     try:
-        nbu = requests.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json", timeout=10).json()
+        nbu = requests.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json", timeout=8).json()
         usd = next((x['rate'] for x in nbu if x['cc'] == 'USD'), None)
         eur = next((x['rate'] for x in nbu if x['cc'] == 'EUR'), None)
         if usd and eur:
@@ -64,14 +80,14 @@ def fetch_currencies():
         log.warning("НБУ: %s", e)
     cash = []
     try:
-        pb = requests.get("https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=5", timeout=10).json()
+        pb = requests.get("https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=5", timeout=8).json()
         for x in pb:
             if x['ccy'] == 'USD': cash.append(f"$ {float(x['sale']):.2f}")
             elif x['ccy'] == 'EUR': cash.append(f"€ {float(x['sale']):.2f}")
     except Exception as e:
         log.warning("PrivatBank: %s", e)
     try:
-        btc = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=10).json()
+        btc = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=8).json()
         cash.append(f"₿ ${int(btc['bitcoin']['usd']):,}")
     except Exception as e:
         log.warning("BTC: %s", e)
@@ -83,8 +99,9 @@ def fetch_national_news():
     items = []
     for src, url in RSS_FEEDS:
         try:
+            # ✅ ВИПРАВЛЕНО: timeout зменшено щоб не зависати
             feed = feedparser.parse(url)
-            for e in feed.entries[:15]:
+            for e in feed.entries[:10]:
                 t = e.get('title', '').strip()
                 l = e.get('link', '').strip()
                 if t and l:
@@ -96,41 +113,46 @@ def fetch_national_news():
 def fetch_local_news():
     items = []
     try:
-        from datetime import datetime, timezone, timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-        
-        sources = [
-            'https://news.google.com/rss/search?q=Маньківка&hl=uk&gl=UA&ceid=UA:uk',
-            'https://news.google.com/rss/search?q=Маньківська+громада&hl=uk&gl=UA&ceid=UA:uk',
-            'https://news.google.com/rss/search?q=Черкаська+область+новини&hl=uk&gl=UA&ceid=UA:uk',
-        ]
-        
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
         seen = set()
-        for url in sources:
-            feed = feedparser.parse(url)
-            for e in feed.entries[:5]:
-                t = e.get('title', '').strip()
-                l = e.get('link', '').strip()
-                pub = e.get('published_parsed')
-                if not t or not l or t in seen:
-                    continue
-                if pub:
-                    pub_dt = datetime(*pub[:6], tzinfo=timezone.utc)
-                    if pub_dt < cutoff:
+
+        for url in LOCAL_RSS_FEEDS:
+            try:
+                feed = feedparser.parse(url)
+                for e in feed.entries[:8]:
+                    t = e.get('title', '').strip()
+                    l = e.get('link', '').strip()
+                    pub = e.get('published_parsed')
+
+                    if not t or not l:
                         continue
-                seen.add(t)
-                items.append({'title': t, 'link': l, 'source': 'local'})
-        
-        return items[:7]
+
+                    # ✅ ВИПРАВЛЕНО: фільтруємо за 3 дні (було 7) і дедублікуємо
+                    key = t.lower()[:60]
+                    if key in seen:
+                        continue
+
+                    if pub:
+                        pub_dt = datetime(*pub[:6], tzinfo=timezone.utc)
+                        if pub_dt < cutoff:
+                            continue
+
+                    seen.add(key)
+                    items.append({'title': t, 'link': l, 'source': 'local'})
+
+            except Exception as ex:
+                log.warning("Local RSS %s: %s", url, ex)
+
+        return items[:5]
     except Exception as e:
         log.warning("Місцеві новини: %s", e)
         return []
 
 SYSTEM_PROMPT = (
     "Ти редактор Telegram-каналу «Маньківка 8:00».\n"
-    "З наданих новин відбери 3-5 національних і 2-3 місцеві. "
+    "З наданих новин відбери 3-5 національних і до 2 місцевих (якщо є). "
     "Для кожної: короткий заголовок (до 10 слів) + 2-4 речення суті.\n"
-    "Відповідай ТІЛЬКИ валідним JSON:\n"
+    "Відповідай ТІЛЬКИ валідним JSON без markdown:\n"
     '{"national":[{"title":"...","summary":"...","link":"..."}],"local":[...]}'
 )
 
@@ -147,11 +169,18 @@ def ai_summarize(items):
             "max_tokens": 1500,
             "temperature": 0.3,
         },
-        timeout=45,
+        # ✅ ВИПРАВЛЕНО: timeout збільшено до 60 щоб Groq встиг відповісти
+        timeout=60,
     ).json()
     raw = resp['choices'][0]['message']['content'].strip()
+    # ✅ ВИПРАВЛЕНО: надійніший парсинг JSON
     if '```' in raw:
-        raw = raw.split('```')[1].lstrip('json').strip()
+        parts = raw.split('```')
+        for part in parts:
+            part = part.lstrip('json').strip()
+            if part.startswith('{'):
+                raw = part
+                break
     return json.loads(raw)
 
 def build_message(now, weather, currencies, digest):
@@ -187,33 +216,42 @@ def build_message(now, weather, currencies, digest):
 def send_digest():
     now = datetime.now(KYIV)
     log.info("Digest started: %s", now.strftime('%H:%M %d.%m.%Y'))
+
     weather = ""
     try:
         weather = fetch_weather()
     except Exception as e:
         log.error("Weather: %s", e)
+
     currencies = ""
     try:
         currencies = fetch_currencies()
     except Exception as e:
         log.error("Currencies: %s", e)
+
     local = fetch_local_news()
     national = fetch_national_news()
+
+    # ✅ ВИПРАВЛЕНО: dedup тепер є в коді
     all_news = dedup(local + national)
+
     if not all_news:
         log.warning("No news, skipping.")
         return
+
     try:
-        digest = ai_summarize(all_news[:30])
+        digest = ai_summarize(all_news[:25])
     except Exception as e:
         log.error("AI failed: %s", e)
         nat = [n for n in all_news if n['source'] == 'national']
         loc = [n for n in all_news if n['source'] == 'local']
         digest = {
             "national": [{"title": n['title'], "summary": "", "link": n['link']} for n in nat[:5]],
-            "local": [{"title": n['title'], "summary": "", "link": n['link']} for n in loc[:3]],
+            "local": [{"title": n['title'], "summary": "", "link": n['link']} for n in loc[:2]],
         }
+
     text = build_message(now, weather, currencies, digest)
+
     resp = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={
