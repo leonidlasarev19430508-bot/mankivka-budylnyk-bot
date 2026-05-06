@@ -1,18 +1,1 @@
-services:
-  - type: web
-    name: mankivka-budylnyk-bot
-    env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app --workers 1 --bind 0.0.0.0:$PORT --timeout 120
-    envVars:
-      - key: BOT_TOKEN
-        sync: false
-      - key: CHANNEL_ID
-        sync: false
-      - key: GROQ_API_KEY
-        sync: false
-      - key: OWM_API_KEY
-        sync: false
-      - key: TZ
-        value: Europe/Kyiv
+
