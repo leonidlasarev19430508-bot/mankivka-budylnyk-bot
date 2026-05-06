@@ -1,6 +1,7 @@
 import os, json, logging
 import requests
 import feedparser
+from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
 import pytz
 
@@ -28,10 +29,36 @@ RSS_FEEDS = [
     ('ЕП',        'https://www.epravda.com.ua/rss/'),
 ]
 
+# RSS-стрічки для місцевих новин: Уманщина + Черкащина
 LOCAL_RSS_FEEDS = [
+    # Суспільне Черкаси — регіональне ТБ/радіо
+    'https://suspilne.media/cherkasy/rss/news.xml',
+    # Google News: Уманський район
+    'https://news.google.com/rss/search?q=Уманський+район&hl=uk&gl=UA&ceid=UA:uk',
+    # Google News: Маньківка
     'https://news.google.com/rss/search?q=Маньківка+Черкаська&hl=uk&gl=UA&ceid=UA:uk',
-    'https://news.google.com/rss/search?q=Маньківська+громада&hl=uk&gl=UA&ceid=UA:uk',
+    # Google News: Умань новини
+    'https://news.google.com/rss/search?q=Умань+новини&hl=uk&gl=UA&ceid=UA:uk',
+    # Google News: Черкаська область
     'https://news.google.com/rss/search?q=Черкаська+область&hl=uk&gl=UA&ceid=UA:uk',
+]
+
+# Сайти для скрапінгу (без RSS)
+LOCAL_SCRAPE_SOURCES = [
+    {
+        'name': 'Умань24',
+        'url': 'https://uman24.org.ua/news/',
+        'item_selector': 'article',
+        'title_selector': 'h2,h3',
+        'link_attr': 'a',
+    },
+    {
+        'name': 'УманьNews',
+        'url': 'https://umannews.city/',
+        'item_selector': 'article',
+        'title_selector': 'h2,h3',
+        'link_attr': 'a',
+    },
 ]
 
 NUM_EMOJI = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣']
@@ -40,7 +67,6 @@ def _t(val):
     v = round(val)
     return f"+{v}°C" if v >= 0 else f"{v}°C"
 
-# ✅ ВИПРАВЛЕНО: додана функція dedup яка була відсутня
 def dedup(items):
     seen = set()
     result = []
@@ -99,7 +125,6 @@ def fetch_national_news():
     items = []
     for src, url in RSS_FEEDS:
         try:
-            # ✅ ВИПРАВЛЕНО: timeout зменшено щоб не зависати
             feed = feedparser.parse(url)
             for e in feed.entries[:10]:
                 t = e.get('title', '').strip()
@@ -110,47 +135,78 @@ def fetch_national_news():
             log.warning("RSS %s: %s", src, ex)
     return items
 
-def fetch_local_news():
+def scrape_local_site(source):
+    """Скрапінг новин з сайтів які не мають RSS"""
     items = []
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+        headers = {'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)'}
+        resp = requests.get(source['url'], timeout=8, headers=headers)
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        articles = soup.select(source['item_selector'])[:10]
         seen = set()
-
-        for url in LOCAL_RSS_FEEDS:
-            try:
-                feed = feedparser.parse(url)
-                for e in feed.entries[:8]:
-                    t = e.get('title', '').strip()
-                    l = e.get('link', '').strip()
-                    pub = e.get('published_parsed')
-
-                    if not t or not l:
-                        continue
-
-                    # ✅ ВИПРАВЛЕНО: фільтруємо за 3 дні (було 7) і дедублікуємо
-                    key = t.lower()[:60]
-                    if key in seen:
-                        continue
-
-                    if pub:
-                        pub_dt = datetime(*pub[:6], tzinfo=timezone.utc)
-                        if pub_dt < cutoff:
-                            continue
-
-                    seen.add(key)
-                    items.append({'title': t, 'link': l, 'source': 'local'})
-
-            except Exception as ex:
-                log.warning("Local RSS %s: %s", url, ex)
-
-        return items[:5]
+        for art in articles:
+            title_tag = art.select_one(source['title_selector'])
+            link_tag = art.select_one(source['link_attr'])
+            if not title_tag or not link_tag:
+                continue
+            t = title_tag.get_text(strip=True)
+            href = link_tag.get('href', '')
+            if not href.startswith('http'):
+                base = source['url'].rstrip('/')
+                href = base + '/' + href.lstrip('/')
+            key = t.lower()[:60]
+            if t and href and key not in seen:
+                seen.add(key)
+                items.append({'title': t, 'link': href, 'source': 'local'})
     except Exception as e:
-        log.warning("Місцеві новини: %s", e)
-        return []
+        log.warning("Scrape %s: %s", source['name'], e)
+    return items
+
+def fetch_local_news():
+    """Збирає місцеві новини з RSS + скрапінгу"""
+    items = []
+    seen = set()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+
+    # 1. RSS джерела
+    for url in LOCAL_RSS_FEEDS:
+        try:
+            feed = feedparser.parse(url)
+            for e in feed.entries[:8]:
+                t = e.get('title', '').strip()
+                l = e.get('link', '').strip()
+                pub = e.get('published_parsed')
+
+                if not t or not l:
+                    continue
+                key = t.lower()[:60]
+                if key in seen:
+                    continue
+                if pub:
+                    pub_dt = datetime(*pub[:6], tzinfo=timezone.utc)
+                    if pub_dt < cutoff:
+                        continue
+                seen.add(key)
+                items.append({'title': t, 'link': l, 'source': 'local'})
+        except Exception as ex:
+            log.warning("Local RSS %s: %s", url, ex)
+
+    # 2. Скрапінг сайтів без RSS
+    for source in LOCAL_SCRAPE_SOURCES:
+        scraped = scrape_local_site(source)
+        for item in scraped:
+            key = item['title'].lower()[:60]
+            if key not in seen:
+                seen.add(key)
+                items.append(item)
+
+    log.info("Місцеві новини знайдено: %d", len(items))
+    return items[:6]
 
 SYSTEM_PROMPT = (
     "Ти редактор Telegram-каналу «Маньківка 8:00».\n"
-    "З наданих новин відбери 3-5 національних і до 2 місцевих (якщо є). "
+    "З наданих новин відбери 3-5 національних і до 2-3 місцевих (якщо є). "
+    "Місцеві — це новини про Маньківку, Уманський район, Умань або Черкаську область. "
     "Для кожної: короткий заголовок (до 10 слів) + 2-4 речення суті.\n"
     "Відповідай ТІЛЬКИ валідним JSON без markdown:\n"
     '{"national":[{"title":"...","summary":"...","link":"..."}],"local":[...]}'
@@ -169,11 +225,9 @@ def ai_summarize(items):
             "max_tokens": 1500,
             "temperature": 0.3,
         },
-        # ✅ ВИПРАВЛЕНО: timeout збільшено до 60 щоб Groq встиг відповісти
         timeout=60,
     ).json()
     raw = resp['choices'][0]['message']['content'].strip()
-    # ✅ ВИПРАВЛЕНО: надійніший парсинг JSON
     if '```' in raw:
         parts = raw.split('```')
         for part in parts:
@@ -198,7 +252,7 @@ def build_message(now, weather, currencies, digest):
             lines.append(f"{n} <b>{item['title']}</b>\n{summary}{read}")
             counter += 1
     if digest.get('local'):
-        lines.append("\n🏡 <b>У ГРОМАДІ</b>")
+        lines.append("\n🏡 <b>У ГРОМАДІ ТА НА УМАНЩИНІ</b>")
         for item in digest['local']:
             n = NUM_EMOJI[counter] if counter < len(NUM_EMOJI) else f"{counter+1}."
             summary = item.get('summary', '').strip()
@@ -231,8 +285,6 @@ def send_digest():
 
     local = fetch_local_news()
     national = fetch_national_news()
-
-    # ✅ ВИПРАВЛЕНО: dedup тепер є в коді
     all_news = dedup(local + national)
 
     if not all_news:
@@ -247,7 +299,7 @@ def send_digest():
         loc = [n for n in all_news if n['source'] == 'local']
         digest = {
             "national": [{"title": n['title'], "summary": "", "link": n['link']} for n in nat[:5]],
-            "local": [{"title": n['title'], "summary": "", "link": n['link']} for n in loc[:2]],
+            "local": [{"title": n['title'], "summary": "", "link": n['link']} for n in loc[:3]],
         }
 
     text = build_message(now, weather, currencies, digest)
