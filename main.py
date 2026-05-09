@@ -227,7 +227,7 @@ def ai_summarize(items):
         },
         timeout=60,
     ).json()
-   if 'choices' not in resp:
+    if 'choices' not in resp:
         log.error("Groq response: %s", json.dumps(resp, ensure_ascii=False))
         raise ValueError(f"No choices: {resp}")
     raw = resp['choices'][0]['message']['content'].strip()
