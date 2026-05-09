@@ -217,7 +217,7 @@ def ai_summarize(items):
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_KEY}"},
         json={
-            "model": "llama3-70b-8192",
+            "model": "llama-3.3-70b-versatile",
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(items, ensure_ascii=False)},
@@ -227,6 +227,9 @@ def ai_summarize(items):
         },
         timeout=60,
     ).json()
+   if 'choices' not in resp:
+        log.error("Groq response: %s", json.dumps(resp, ensure_ascii=False))
+        raise ValueError(f"No choices: {resp}")
     raw = resp['choices'][0]['message']['content'].strip()
     if '```' in raw:
         parts = raw.split('```')
