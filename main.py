@@ -29,21 +29,14 @@ RSS_FEEDS = [
     ('ЕП',        'https://www.epravda.com.ua/rss/'),
 ]
 
-# RSS-стрічки для місцевих новин: Уманщина + Черкащина
 LOCAL_RSS_FEEDS = [
-    # Суспільне Черкаси — регіональне ТБ/радіо
     'https://suspilne.media/cherkasy/rss/news.xml',
-    # Google News: Уманський район
     'https://news.google.com/rss/search?q=Уманський+район&hl=uk&gl=UA&ceid=UA:uk',
-    # Google News: Маньківка
     'https://news.google.com/rss/search?q=Маньківка+Черкаська&hl=uk&gl=UA&ceid=UA:uk',
-    # Google News: Умань новини
     'https://news.google.com/rss/search?q=Умань+новини&hl=uk&gl=UA&ceid=UA:uk',
-    # Google News: Черкаська область
     'https://news.google.com/rss/search?q=Черкаська+область&hl=uk&gl=UA&ceid=UA:uk',
 ]
 
-# Сайти для скрапінгу (без RSS)
 LOCAL_SCRAPE_SOURCES = [
     {
         'name': 'Умань24',
@@ -136,7 +129,6 @@ def fetch_national_news():
     return items
 
 def scrape_local_site(source):
-    """Скрапінг новин з сайтів які не мають RSS"""
     items = []
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0)'}
@@ -163,12 +155,9 @@ def scrape_local_site(source):
     return items
 
 def fetch_local_news():
-    """Збирає місцеві новини з RSS + скрапінгу"""
     items = []
     seen = set()
     cutoff = datetime.now(timezone.utc) - timedelta(days=3)
-
-    # 1. RSS джерела
     for url in LOCAL_RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
@@ -176,7 +165,6 @@ def fetch_local_news():
                 t = e.get('title', '').strip()
                 l = e.get('link', '').strip()
                 pub = e.get('published_parsed')
-
                 if not t or not l:
                     continue
                 key = t.lower()[:60]
@@ -190,8 +178,6 @@ def fetch_local_news():
                 items.append({'title': t, 'link': l, 'source': 'local'})
         except Exception as ex:
             log.warning("Local RSS %s: %s", url, ex)
-
-    # 2. Скрапінг сайтів без RSS
     for source in LOCAL_SCRAPE_SOURCES:
         scraped = scrape_local_site(source)
         for item in scraped:
@@ -199,7 +185,6 @@ def fetch_local_news():
             if key not in seen:
                 seen.add(key)
                 items.append(item)
-
     log.info("Місцеві новини знайдено: %d", len(items))
     return items[:6]
 
@@ -227,15 +212,15 @@ def ai_summarize(items):
         },
         timeout=60,
     ).json()
-    if 'choices' not in resp:
+    if "choices" not in resp:
         log.error("Groq response: %s", json.dumps(resp, ensure_ascii=False))
-        raise ValueError(f"No choices: {resp}")
-    raw = resp['choices'][0]['message']['content'].strip()
-    if '```' in raw:
-        parts = raw.split('```')
+        raise ValueError(resp)
+    raw = resp["choices"][0]["message"]["content"].strip()
+    if "```" in raw:
+        parts = raw.split("```")
         for part in parts:
-            part = part.lstrip('json').strip()
-            if part.startswith('{'):
+            part = part.lstrip("json").strip()
+            if part.startswith("{"):
                 raw = part
                 break
     return json.loads(raw)
@@ -273,27 +258,22 @@ def build_message(now, weather, currencies, digest):
 def send_digest():
     now = datetime.now(KYIV)
     log.info("Digest started: %s", now.strftime('%H:%M %d.%m.%Y'))
-
     weather = ""
     try:
         weather = fetch_weather()
     except Exception as e:
         log.error("Weather: %s", e)
-
     currencies = ""
     try:
         currencies = fetch_currencies()
     except Exception as e:
         log.error("Currencies: %s", e)
-
     local = fetch_local_news()
     national = fetch_national_news()
     all_news = dedup(local + national)
-
     if not all_news:
         log.warning("No news, skipping.")
         return
-
     try:
         digest = ai_summarize(all_news[:25])
     except Exception as e:
@@ -304,9 +284,7 @@ def send_digest():
             "national": [{"title": n['title'], "summary": "", "link": n['link']} for n in nat[:5]],
             "local": [{"title": n['title'], "summary": "", "link": n['link']} for n in loc[:3]],
         }
-
     text = build_message(now, weather, currencies, digest)
-
     resp = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={
