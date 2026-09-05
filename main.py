@@ -14,7 +14,7 @@ GROQ_KEY    = os.environ['GROQ_API_KEY']
 OWM_KEY     = os.environ['OWM_API_KEY']
 KYIV        = pytz.timezone('Europe/Kyiv')
 CHANNEL_URL = "https://t.me/Mankivka8am"
-MADYAR_RSS = "https://news.google.com/rss/search?q=%D0%9C%D0%B0%D0%B4%D1%8F%D1%80&hl=uk&gl=UA&ceid=UA:uk"  # Google News пошук новин про Мадяр
+MADYAR_RSS = "https://rsshub.app/telegram/channel/robert_magyar"  # Telegram канал Роберта Бровді (Мадяр) через RSSHub
 
 MONTHS_UA = {
     1:'січня', 2:'лютого', 3:'березня', 4:'квітня',
@@ -199,55 +199,68 @@ SYSTEM_PROMPT = (
 )
 
 def fetch_madyar_reports():
-    """Отримати останні текстові новини про Мадяр через Google News RSS."""
-    if not MADYAR_RSS:
-        return []
+    """Отримати останні текстові новини/дописи з Telegram каналу Роберта Бровді (Мадяр)."""
+    # Первинне джерело: Telegram через RSSHub
+    primary_rss = MADYAR_RSS  # RSSHub для Telegram каналу
+    # Резервне джерело: Google News з точним запитом про Роберта Бровді (Мадяр)
+    secondary_rss = "https://news.google.com/rss/search?q=%D0%A0%D0%BE%D0%B1%D0%B5%D1%80%D1%82+%D0%91%D1%80%D0%BE%D0%B2%D0%B4%D1%96+%D0%9C%D0%B0%D0%B4%D1%8F%D1%80&hl=uk&gl=UA&ceid=UA:uk"
     
     # Fallback елемент - посилання на Google News пошук
     fallback_item = {
-        'title': 'Новини про Мадяр на Google News',
-        'link': 'https://news.google.com/search?q=%D0%9C%D0%B0%D0%B4%D1%8F%D1%80&hl=uk&gl=UA&ceid=UA%3Auk',
+        'title': 'Новини про Роберта Бровді (Мадяр) на Google News',
+        'link': 'https://news.google.com/search?q=%D0%A0%D0%BE%D0%B1%D0%B5%D1%80%D1%82+%D0%91%D1%80%D0%BE%D0%B2%D0%B4%D1%96+%D0%9C%D0%B0%D0%B4%D1%8F%D1%80&hl=uk&gl=UA&ceid=UA%3Auk',
         'source': 'madyar_fallback'
     }
     
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/xml,application/atom+xml,text/xml',
-        }
-        response = requests.get(MADYAR_RSS, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        # Парсимо XML через feedparser
-        feed = feedparser.parse(response.text)
-        
-        if not feed.entries:
-            log.warning("Madyar Google News RSS returned empty entries")
-            return [fallback_item]
-        
-        items = []
-        for entry in feed.entries[:5]:  # останні 5 текстових новин
-            # Перевіряємо обов'язкові поля
-            if not (hasattr(entry, 'title') and hasattr(entry, 'link')):
-                continue
-            items.append({
-                'title': entry.title,
-                'link': entry.link,
-                'published': getattr(entry, 'published', ''),
-                'source': 'madyar'
-            })
-        
-        if not items:
-            log.warning("Madyar Google News RSS has entries but no valid items")
-            return [fallback_item]
-        
-        log.info("Madyar Google News RSS fetched %d items", len(items))
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/xml,application/atom+xml,text/xml',
+    }
+    
+    def try_fetch_rss(rss_url, source_name):
+        """Спроба отримати новини з RSS URL."""
+        try:
+            response = requests.get(rss_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            feed = feedparser.parse(response.text)
+            
+            if not feed.entries:
+                log.warning(f"Madyar {source_name} RSS returned empty entries")
+                return []
+            
+            items = []
+            for entry in feed.entries[:3]:  # останні 3 текстові новини/дописи
+                if not (hasattr(entry, 'title') and hasattr(entry, 'link')):
+                    continue
+                items.append({
+                    'title': entry.title,
+                    'link': entry.link,
+                    'published': getattr(entry, 'published', ''),
+                    'source': 'madyar'
+                })
+            
+            if items:
+                log.info(f"Madyar {source_name} RSS fetched %d items", len(items))
+            return items
+        except Exception as e:
+            log.warning(f"Madyar {source_name} RSS failed: %s", e)
+            print(f"Error fetching Madyar {source_name} RSS: {e}")
+            return []
+    
+    # Спершу пробуємо первинне джерело (Telegram через RSSHub)
+    items = try_fetch_rss(primary_rss, "Telegram RSSHub")
+    if items:
         return items
-    except Exception as e:
-        log.warning("Madyar Google News RSS failed: %s", e)
-        print(f"Error fetching Madyar Google News RSS: {e}")
-        # Fallback до посилання на Google News при будь-якій помилці
-        return [fallback_item]
+    
+    # Якщо первинне джерело не повернуло новин, пробуємо резервне (Google News)
+    log.info("Primary RSS source empty, trying secondary Google News")
+    items = try_fetch_rss(secondary_rss, "Google News")
+    if items:
+        return items
+    
+    # Якщо обидва джерела не працюють, повертаємо fallback
+    log.warning("Both Madyar RSS sources failed, returning fallback")
+    return [fallback_item]
 def ai_summarize(items):
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
