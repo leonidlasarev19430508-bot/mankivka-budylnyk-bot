@@ -290,6 +290,14 @@ def build_message(now, weather, currencies, digest, madyar_reports=None):
             read = f' <a href="{link}">Читати</a>' if link else ''
             lines.append(f"{n} <b>{item['title']}</b>\n{summary}{read}")
             counter += 1
+    if madyar_reports:
+        lines.append("\n🦅 <b>ЗВІТИ ВІД МАДЯРА</b>")
+        for item in madyar_reports:
+            n = NUM_EMOJI[counter] if counter < len(NUM_EMOJI) else f"{counter+1}."
+            link = item.get('link', '')
+            watch = f' <a href="{link}">Дивитись</a>' if link else ''
+            lines.append(f"{n} <b>{item['title']}</b>\n{watch}")
+            counter += 1
     if digest.get('local'):
         lines.append("\n🏡 <b>У ГРОМАДІ ТА НА УМАНЩИНІ</b>")
         for item in digest['local']:
@@ -299,20 +307,12 @@ def build_message(now, weather, currencies, digest, madyar_reports=None):
             read = f' <a href="{link}">Читати</a>' if link else ''
             lines.append(f"{n} <b>{item['title']}</b>\n{summary}{read}")
             counter += 1
-    if madyar_reports:
-        lines.append("\\n🦅 <b>ЗВІТИ ВІД МАДЯРА</b>")
-        for item in madyar_reports:
-            n = NUM_EMOJI[counter] if counter < len(NUM_EMOJI) else f"{counter+1}."
-            link = item.get('link', '')
-            watch = f' <a href="{link}">Дивитись</a>' if link else ''
-            lines.append(f"{n} <b>{item['title']}</b>{watch}")
-            counter += 1
     lines.append("\n📊 <b>КОРИСНО ЗНАТИ</b>")
     if weather:
         lines.append(f"🌡️ <b>Погода в Маньківці:</b> {weather}")
     if currencies:
         lines.append(currencies)
-    return '\n'.join(lines)
+    return '\\n'.join(lines)
 
 def send_digest():
     now = datetime.now(KYIV)
