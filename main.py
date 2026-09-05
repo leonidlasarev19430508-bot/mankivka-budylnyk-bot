@@ -202,6 +202,14 @@ def fetch_madyar_reports():
     """Отримати останні відео/дописи з каналу Мадяр через RSS."""
     if not MADYAR_RSS:
         return []
+    
+    # Fallback елемент
+    fallback_item = {
+        'title': 'Останні відео на YouTube-каналі Мадяра',
+        'link': 'https://www.youtube.com/@MAGYARBIRDS',
+        'source': 'madyar_fallback'
+    }
+    
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -215,7 +223,7 @@ def fetch_madyar_reports():
         
         if not feed.entries:
             log.warning("Madyar RSS returned empty entries")
-            return []
+            return [fallback_item]
         
         items = []
         for entry in feed.entries[:3]:  # останні 3 відео
@@ -228,11 +236,18 @@ def fetch_madyar_reports():
                 'published': getattr(entry, 'published', ''),
                 'source': 'madyar'
             })
+        
+        if not items:
+            log.warning("Madyar RSS has entries but no valid items")
+            return [fallback_item]
+        
         log.info("Madyar RSS fetched %d items", len(items))
         return items
     except Exception as e:
         log.warning("Madyar RSS failed: %s", e)
-        return []
+        print(f"Error fetching Madyar RSS: {e}")
+        # Fallback до прямого посилання на канал при будь-якій помилці
+        return [fallback_item]
 def ai_summarize(items):
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
