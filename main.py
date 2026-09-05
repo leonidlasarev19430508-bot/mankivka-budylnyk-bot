@@ -304,7 +304,7 @@ def build_message(now, weather, currencies, digest, madyar_reports=None):
             lines.append(f"{n} <b>{item['title']}</b>\n{summary}{read}")
             counter += 1
     if madyar_reports:
-        lines.append("\n🦅 <b>ЗВІТИ ТА НОВИНИ ПРО МАДЯРА</b>")
+        lines.append("\n🦅 <b>ЗВЕДЕННЯ ВІД МАДЯРА</b>")
         for item in madyar_reports:
             n = NUM_EMOJI[counter] if counter < len(NUM_EMOJI) else f"{counter+1}."
             link = item.get('link', '')
