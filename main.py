@@ -14,7 +14,7 @@ GROQ_KEY    = os.environ['GROQ_API_KEY']
 OWM_KEY     = os.environ['OWM_API_KEY']
 KYIV        = pytz.timezone('Europe/Kyiv')
 CHANNEL_URL = "https://t.me/Mankivka8am"
-MADYAR_RSS = "https://www.youtube.com/feeds/videos.xml?channel_id=UC2s_47B3GzB8dlyR-S3eIwg"  # YouTube канал Мадяр
+MADYAR_RSS = "https://news.google.com/rss/search?q=%D0%9C%D0%B0%D0%B4%D1%8F%D1%80&hl=uk&gl=UA&ceid=UA:uk"  # Google News пошук новин про Мадяр
 
 MONTHS_UA = {
     1:'січня', 2:'лютого', 3:'березня', 4:'квітня',
@@ -199,14 +199,14 @@ SYSTEM_PROMPT = (
 )
 
 def fetch_madyar_reports():
-    """Отримати останні відео/дописи з каналу Мадяр через RSS."""
+    """Отримати останні текстові новини про Мадяр через Google News RSS."""
     if not MADYAR_RSS:
         return []
     
-    # Fallback елемент
+    # Fallback елемент - посилання на Google News пошук
     fallback_item = {
-        'title': 'Останні відео на YouTube-каналі Мадяра',
-        'link': 'https://www.youtube.com/@MAGYARBIRDS',
+        'title': 'Новини про Мадяр на Google News',
+        'link': 'https://news.google.com/search?q=%D0%9C%D0%B0%D0%B4%D1%8F%D1%80&hl=uk&gl=UA&ceid=UA%3Auk',
         'source': 'madyar_fallback'
     }
     
@@ -222,11 +222,11 @@ def fetch_madyar_reports():
         feed = feedparser.parse(response.text)
         
         if not feed.entries:
-            log.warning("Madyar RSS returned empty entries")
+            log.warning("Madyar Google News RSS returned empty entries")
             return [fallback_item]
         
         items = []
-        for entry in feed.entries[:3]:  # останні 3 відео
+        for entry in feed.entries[:5]:  # останні 5 текстових новин
             # Перевіряємо обов'язкові поля
             if not (hasattr(entry, 'title') and hasattr(entry, 'link')):
                 continue
@@ -238,15 +238,15 @@ def fetch_madyar_reports():
             })
         
         if not items:
-            log.warning("Madyar RSS has entries but no valid items")
+            log.warning("Madyar Google News RSS has entries but no valid items")
             return [fallback_item]
         
-        log.info("Madyar RSS fetched %d items", len(items))
+        log.info("Madyar Google News RSS fetched %d items", len(items))
         return items
     except Exception as e:
-        log.warning("Madyar RSS failed: %s", e)
-        print(f"Error fetching Madyar RSS: {e}")
-        # Fallback до прямого посилання на канал при будь-якій помилці
+        log.warning("Madyar Google News RSS failed: %s", e)
+        print(f"Error fetching Madyar Google News RSS: {e}")
+        # Fallback до посилання на Google News при будь-якій помилці
         return [fallback_item]
 def ai_summarize(items):
     resp = requests.post(
@@ -291,11 +291,11 @@ def build_message(now, weather, currencies, digest, madyar_reports=None):
             lines.append(f"{n} <b>{item['title']}</b>\n{summary}{read}")
             counter += 1
     if madyar_reports:
-        lines.append("\n🦅 <b>ЗВІТИ ВІД МАДЯРА</b>")
+        lines.append("\n🦅 <b>ЗВІТИ ТА НОВИНИ ПРО МАДЯРА</b>")
         for item in madyar_reports:
             n = NUM_EMOJI[counter] if counter < len(NUM_EMOJI) else f"{counter+1}."
             link = item.get('link', '')
-            watch = f' <a href="{link}">Дивитись</a>' if link else ''
+            watch = f' <a href="{link}">Читати</a>' if link else ''
             lines.append(f"{n} <b>{item['title']}</b>\n{watch}")
             counter += 1
     if digest.get('local'):
@@ -312,7 +312,7 @@ def build_message(now, weather, currencies, digest, madyar_reports=None):
         lines.append(f"🌡️ <b>Погода в Маньківці:</b> {weather}")
     if currencies:
         lines.append(currencies)
-    return '\\n'.join(lines)
+    return '\n'.join(lines)
 
 def send_digest():
     now = datetime.now(KYIV)
