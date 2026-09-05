@@ -203,15 +203,32 @@ def fetch_madyar_reports():
     if not MADYAR_RSS:
         return []
     try:
-        feed = feedparser.parse(MADYAR_RSS)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/xml,application/atom+xml,text/xml',
+        }
+        response = requests.get(MADYAR_RSS, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Парсимо XML через feedparser
+        feed = feedparser.parse(response.text)
+        
+        if not feed.entries:
+            log.warning("Madyar RSS returned empty entries")
+            return []
+        
         items = []
         for entry in feed.entries[:3]:  # останні 3 відео
+            # Перевіряємо обов'язкові поля
+            if not (hasattr(entry, 'title') and hasattr(entry, 'link')):
+                continue
             items.append({
                 'title': entry.title,
                 'link': entry.link,
-                'published': entry.published,
+                'published': getattr(entry, 'published', ''),
                 'source': 'madyar'
             })
+        log.info("Madyar RSS fetched %d items", len(items))
         return items
     except Exception as e:
         log.warning("Madyar RSS failed: %s", e)
