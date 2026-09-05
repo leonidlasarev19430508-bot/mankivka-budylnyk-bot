@@ -14,6 +14,7 @@ GROQ_KEY    = os.environ['GROQ_API_KEY']
 OWM_KEY     = os.environ['OWM_API_KEY']
 KYIV        = pytz.timezone('Europe/Kyiv')
 CHANNEL_URL = "https://t.me/Mankivka8am"
+MADYAR_RSS = ""  # RSS YouTube каналу Мадяр (наприклад https://www.youtube.com/feeds/videos.xml?channel_id=...)
 
 MONTHS_UA = {
     1:'січня', 2:'лютого', 3:'березня', 4:'квітня',
@@ -197,6 +198,24 @@ SYSTEM_PROMPT = (
     '{"national":[{"title":"...","summary":"...","link":"..."}],"local":[...]}'
 )
 
+def fetch_madyar_reports():
+    """Отримати останні відео/дописи з каналу Мадяр через RSS."""
+    if not MADYAR_RSS:
+        return []
+    try:
+        feed = feedparser.parse(MADYAR_RSS)
+        items = []
+        for entry in feed.entries[:3]:  # останні 3 відео
+            items.append({
+                'title': entry.title,
+                'link': entry.link,
+                'published': entry.published,
+                'source': 'madyar'
+            })
+        return items
+    except Exception as e:
+        log.warning("Madyar RSS failed: %s", e)
+        return []
 def ai_summarize(items):
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -225,7 +244,7 @@ def ai_summarize(items):
                 break
     return json.loads(raw)
 
-def build_message(now, weather, currencies, digest):
+def build_message(now, weather, currencies, digest, madyar_reports=None):
     date_str = f"{now.day} {MONTHS_UA[now.month]}"
     time_str = now.strftime('%H:%M')
     lines = [f"🌅 <b>Маньківка {time_str} | Будильник новин на {date_str}</b>\n"]
@@ -247,6 +266,14 @@ def build_message(now, weather, currencies, digest):
             link = item.get('link', '')
             read = f' <a href="{link}">Читати</a>' if link else ''
             lines.append(f"{n} <b>{item['title']}</b>\n{summary}{read}")
+            counter += 1
+    if madyar_reports:
+        lines.append("\\n🦅 <b>ЗВІТИ ВІД МАДЯРА</b>")
+        for item in madyar_reports:
+            n = NUM_EMOJI[counter] if counter < len(NUM_EMOJI) else f"{counter+1}."
+            link = item.get('link', '')
+            watch = f' <a href="{link}">Дивитись</a>' if link else ''
+            lines.append(f"{n} <b>{item['title']}</b>{watch}")
             counter += 1
     lines.append("\n📊 <b>КОРИСНО ЗНАТИ</b>")
     if weather:
@@ -270,6 +297,7 @@ def send_digest():
         log.error("Currencies: %s", e)
     local = fetch_local_news()
     national = fetch_national_news()
+    madyar = fetch_madyar_reports()
     all_news = dedup(local + national)
     if not all_news:
         log.warning("No news, skipping.")
@@ -284,7 +312,7 @@ def send_digest():
             "national": [{"title": n['title'], "summary": "", "link": n['link']} for n in nat[:5]],
             "local": [{"title": n['title'], "summary": "", "link": n['link']} for n in loc[:3]],
         }
-    text = build_message(now, weather, currencies, digest)
+    text = build_message(now, weather, currencies, digest, madyar_reports=madyar)
     resp = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={

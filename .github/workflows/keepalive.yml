@@ -1,0 +1,13 @@
+name: Keep Repository Active
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep Repository Active
+        uses: gautamkrishnar/keepalive-workflow@v2
