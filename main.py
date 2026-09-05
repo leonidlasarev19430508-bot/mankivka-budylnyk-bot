@@ -14,7 +14,7 @@ GROQ_KEY    = os.environ['GROQ_API_KEY']
 OWM_KEY     = os.environ['OWM_API_KEY']
 KYIV        = pytz.timezone('Europe/Kyiv')
 CHANNEL_URL = "https://t.me/Mankivka8am"
-MADYAR_RSS = ""  # RSS YouTube каналу Мадяр (наприклад https://www.youtube.com/feeds/videos.xml?channel_id=...)
+MADYAR_RSS = "https://www.youtube.com/feeds/videos.xml?channel_id=UC2s_47B3GzB8dlyR-S3eIwg"
 
 MONTHS_UA = {
     1:'січня', 2:'лютого', 3:'березня', 4:'квітня',
