@@ -1,31 +1,118 @@
 name: Маньківка 8:00 — Будильник новин
 
+# GitHub запускає заплановані workflow із затримкою (буває 4–7 годин),
+# тому стартуємо вночі двічі, чекаємо до 08:00 за Києвом і тоді надсилаємо.
+# Позначка в кеші "alarm-sent-<дата>" не дає надіслати двічі за день.
+
 on:
   schedule:
-   - cron: '0 4 * * *'
+    - cron: '17 21 * * *'   # 23:17 / 00:17 за Києвом
+    - cron: '47 0 * * *'    # 02:47 / 03:47 за Києвом — запасний запуск
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'send — надіслати зараз; dry-run — лише перевірити розклад'
+        type: choice
+        options: [send, dry-run]
+        default: send
+
+# Запуски йдуть по черзі: поки один чекає 08:00, наступний стоїть у черзі,
+# а коли дійде його черга — побачить позначку і нічого не надішле.
+concurrency:
+  group: alarm
+  cancel-in-progress: false
 
 jobs:
   send-digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 358
 
     steps:
+      - name: Розрахувати час до 08:00 (Київ)
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          export TZ=Europe/Kyiv
+          now=$(date +%s)
+          hour=$((10#$(date +%H)))
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$MODE" != "dry-run" ]; then
+            wait=0; day=$(date +%F); manual=true
+          elif [ "$hour" -ge 8 ] && [ "$hour" -lt 14 ]; then
+            # Уже після 8:00, а сьогодні ще не надсилали — надсилаємо одразу
+            wait=0; day=$(date +%F); manual=false
+          else
+            if [ "$hour" -lt 8 ]; then target=$(date -d "today 08:00" +%s)
+            else target=$(date -d "tomorrow 08:00" +%s); fi
+            wait=$((target - now)); day=$(date -d "@$target" +%F); manual=false
+          fi
+          skip=false
+          # Ранер живе до 6 годин — якщо чекати довше 5 год 45 хв, лишаємо це наступному запуску
+          if [ "$wait" -gt 20700 ]; then skip=true; fi
+          echo "Зараз $(date '+%F %H:%M'), ціль $day 08:00, чекати ${wait}s, пропустити: $skip"
+          echo "wait=$wait" >> "$GITHUB_OUTPUT"
+          echo "day=$day"   >> "$GITHUB_OUTPUT"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "manual=$manual" >> "$GITHUB_OUTPUT"
+
+      - name: Чи вже надсилали сьогодні
+        id: sent
+        if: steps.plan.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .sent
+          key: alarm-sent-${{ steps.plan.outputs.day }}
+          lookup-only: true
+
+      - name: Вирішити, чи надсилати
+        id: go
+        env:
+          SKIP: ${{ steps.plan.outputs.skip }}
+          HIT: ${{ steps.sent.outputs.cache-hit }}
+          MANUAL: ${{ steps.plan.outputs.manual }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          go=true
+          if [ "$SKIP" = "true" ]; then go=false; echo "Зарано — надішле наступний запуск."; fi
+          if [ "$HIT" = "true" ] && [ "$MANUAL" != "true" ]; then go=false; echo "Сьогодні вже надіслано."; fi
+          if [ "$MODE" = "dry-run" ]; then echo "Dry-run: розклад перевірено, нічого не надсилаємо (go=$go)."; go=false; fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
+      - name: Чекати до 08:00
+        if: steps.go.outputs.go == 'true' && steps.plan.outputs.wait != '0'
+        run: sleep ${{ steps.plan.outputs.wait }}
+
       - name: Отримати код
+        if: steps.go.outputs.go == 'true'
         uses: actions/checkout@v4.2.2
 
       - name: Встановити Python
+        if: steps.go.outputs.go == 'true'
         uses: actions/setup-python@v5.1.1
         with:
           python-version: '3.11'
 
       - name: Встановити бібліотеки
+        if: steps.go.outputs.go == 'true'
         run: pip install -r requirements.txt
 
       - name: Запустити будильник
+        if: steps.go.outputs.go == 'true'
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
         run: python main.py
+
+      - name: Позначити, що сьогодні надіслано
+        if: steps.go.outputs.go == 'true' && steps.plan.outputs.manual != 'true'
+        run: echo "${{ steps.plan.outputs.day }}" > .sent
+
+      - name: Зберегти позначку
+        if: steps.go.outputs.go == 'true' && steps.plan.outputs.manual != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .sent
+          key: alarm-sent-${{ steps.plan.outputs.day }}
